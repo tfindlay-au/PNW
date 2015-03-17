@@ -1,5 +1,4 @@
 
-import java.awt.Desktop;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
@@ -10,7 +9,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
-import java.net.URL;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
@@ -24,7 +22,7 @@ import javax.activation.DataHandler;
 import javax.activation.FileDataSource;
 import javax.mail.Message;
 import javax.mail.Multipart;
-import javax.mail.PasswordAuthentication;
+import javax.mail.SendFailedException;
 import javax.mail.Session;
 import javax.mail.Transport;
 import javax.mail.internet.AddressException;
@@ -38,6 +36,8 @@ import javax.print.DocPrintJob;
 import javax.print.PrintService;
 import javax.print.PrintServiceLookup;
 import javax.print.SimpleDoc;
+import javax.print.attribute.Attribute;
+import javax.print.attribute.AttributeSet;
 import javax.print.attribute.HashPrintRequestAttributeSet;
 import javax.print.attribute.HashPrintServiceAttributeSet;
 import javax.print.attribute.PrintRequestAttributeSet;
@@ -75,8 +75,8 @@ import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 /**
- * @author Teodor Danciu (teodord@users.sourceforge.net)
- * @version $Id: XmlDataSourceApp.java,v 1.13 2006/04/19 10:26:14 teodord Exp $
+ * @author Timothy Findlay (tfindlay@prodevelop.com.au)
+ * @version $Id: BuildReport7.java,v 1.13 2006/04/19 10:26:14
  */
 public class BuildReport7
 {
@@ -92,7 +92,7 @@ public class BuildReport7
 	private static final String TASK_PDF_E = "pdfemail";
 	private static final String TASK_PDF   = "pdf";
 
-	// Program configuration settings go in here
+	// Program configuration settings go in here. Get file name from environment variable and read options in.
 	private static Properties configProps = new Properties();
 
 	private static void replaceTxt(String oldstring, String newstring, File in, File out) throws Exception {
@@ -109,7 +109,7 @@ public class BuildReport7
 		}
 		catch( IOException e )
 		{
-			System.out.println("replaceTxt - IOException: " + e.getMessage()  );
+			System.out.println("ERROR: replaceTxt() IOException: " + e.getMessage()  );
 			throw e;
 		}
 	}
@@ -122,7 +122,15 @@ public class BuildReport7
 		// Setup Log4J Logging
 		//org.apache.log4j.BasicConfigurator.configure();
 	    
-		// Read config options from properties file
+		/* Read config options from properties file
+		 * Possible options include:
+		 *   jdbc.connection.url
+		 *   jdbc.connection.username
+		 *   jdbc.connection.password
+		 *
+		 * Should migrate other hard coded values into config file.
+		 *   suppliment = "C:\\mtmsroot\\mtms\\DOCUMENTS\\UB\\OUTPUT\\CUTSHEET\\" + suppliment + ".pdf";
+		 */
 		try {
 			String configFilename = System.getenv("CONFIG_FILENAME");
 			if( configFilename == null) {
@@ -227,7 +235,7 @@ public class BuildReport7
 			
 				// TODO: Test Input params before we begin		
 				makePDF(dataName, fileName, outputName, true, parameters);
-				System.out.println("PDF creation time : " + (System.currentTimeMillis() - start));
+				System.out.println("INFO: PDF creation time - " + (System.currentTimeMillis() - start));
 		
 				sendToPrinter(printerName, dataName, fileName, printCopies, parameters);
 
@@ -236,11 +244,9 @@ public class BuildReport7
 				{
 					//TODO Remove Hardcoded XML Tag name
 					String suppliment = getSuppliment(dataName,"/UBF993/DOCHEADER/SALESORDER");
-					
-					//TODO Remove Hardcoded path, should be parameterised
-					suppliment = "C:\\mtmsroot\\mtms\\DOCUMENTS\\UB\\OUTPUT\\CUTSHEET\\" + suppliment + ".pdf";
+					suppliment = configProps.getProperty("batchcard.cutsheet.path") + suppliment + ".pdf";
 
-					System.out.println("Looking for cutsheet : " + suppliment);
+					System.out.println("INFO: Looking for cutsheet : " + suppliment);
 					printFile( suppliment, printerName );
 				}
 
@@ -324,13 +330,13 @@ public class BuildReport7
 								if( emailName == "" ) {
 									// No Address in file, return to sender
 									emailName = emailFrom;
-									System.out.println("XML Address was Blank. Using Sender address.");
+									System.out.println("WARNING: XML Address was Blank. Using Sender address.");
 								}
 		
 							
 							} else {
 		
-								System.out.println("Email paramter is Evolution Requestor!");
+								System.out.println("INFO: Email paramter is Evolution Requestor!");
 								emailName = getEmailAddress( emailName );
 							}
 						}
@@ -385,7 +391,7 @@ public class BuildReport7
 				}
 		
 		
-				System.out.println("Total processing time : " + (System.currentTimeMillis() - start));
+				System.out.println("INFO: Total processing time : " + (System.currentTimeMillis() - start));
 				System.exit(0);
 			}						
 			else if (TASK_PDF.equals(taskName))
@@ -399,7 +405,7 @@ public class BuildReport7
 				}
 				
 				makePDF(dataName, fileName, outputName, true, parameters);
-				System.out.println("PDF running time : " + (System.currentTimeMillis() - start));
+				System.out.println("INFO: PDF running time : " + (System.currentTimeMillis() - start));
 		
 				System.exit(0);
 			}						
@@ -459,55 +465,43 @@ public class BuildReport7
 		return suppStr;
 	}
 	
-	/**
-	 * Method to print an external PDF document
-	 * @param fileName
-	 * @param printerName
-	 */
-	private static void printFile(String fileName, String printerName)
-	{
-		FileInputStream psStream = null;
-
-		try {
-			psStream = new FileInputStream( fileName );
-		} catch (FileNotFoundException ffne) {
-			System.out.println("ERROR: " + fileName + " does not exist!");
-			ffne.printStackTrace();
-		}
-
-		if (psStream == null) {
-			return;
-		}
-
-		DocFlavor psInFormat = DocFlavor.INPUT_STREAM.AUTOSENSE;
-		Doc myDoc = new SimpleDoc(psStream, psInFormat, null); 
-		         
-		// this step is necessary because I have several printers configured
-		PrintService myPrinter = null;
-		
-		//list all printers and find the one selected by the user
-        PrintRequestAttributeSet aset = new HashPrintRequestAttributeSet();
-		PrintService[] servicesList = PrintServiceLookup.lookupPrintServices(null, aset);
-		for(int l=0;l<servicesList.length;l++){
-			
-			if(servicesList[l].getName().trim().equals( printerName.trim() )){
-				System.out.println("BINGO! Printer queue name:" + servicesList[l].getName() );
-				myPrinter = servicesList[l];
-				break;
+		/**
+		 * Method to print an external PDF document
+		 * @param fileName
+		 * @param printerName
+		 */
+		private static void printFile(String fileName, String printerName)
+		{
+			FileInputStream psStream = null;
+	
+			try {
+				psStream = new FileInputStream( fileName );
+			} catch (FileNotFoundException ffne) {
+				System.out.println("ERROR: " + fileName + " does not exist!");
+				return;
 			}
+	
+			DocFlavor psInFormat = DocFlavor.INPUT_STREAM.AUTOSENSE;
+			Doc myDoc = new SimpleDoc(psStream, psInFormat, null); 
+			         
+			// this step is necessary because I have several printers configured
+			PrintService myPrinter = null;
+			
+			myPrinter = getPrinterQueue( printerName.trim() );
+			         
+	        if (myPrinter != null) {           
+	            DocPrintJob job = myPrinter.createPrintJob();
+	            try {
+	            	job.print(myDoc, new HashPrintRequestAttributeSet() ); 
+	            } catch (Exception pe) {
+	            	pe.printStackTrace();
+	            }
+	            
+	        } else {
+	            System.err.println("ERROR: Could not use print queue " + printerName.trim() );
+	        }
+			
 		}
-		         
-        if (myPrinter != null) {           
-            DocPrintJob job = myPrinter.createPrintJob();
-            try {
-            job.print(myDoc, aset);
-             
-            } catch (Exception pe) {pe.printStackTrace();}
-        } else {
-            System.out.println("ERROR: Could not find printer queue " + printerName.trim() );
-        }
-		
-	}
         /**
          * Method of parse XML feeds for multi-page documents
 		 *
@@ -657,9 +651,7 @@ public class BuildReport7
 					// Check Document Tags for Multi-Doc!
 					m.setDocCount( getDocumentCount( document, "/" + m.getDocRoot() + "/" + m.getDocElement() ) );
 										
-				} else if( fileName.endsWith("PurchaseOrder.jasper") ) {
-					System.out.println("DEBUG: isMultiDoc() - Detected Purchase Order");
-					
+				} else if( fileName.endsWith("PurchaseOrder.jasper") ) {					
 					m.setDocRoot( "docroot");
 					m.setDocElement( "porder");
 					m.setDocKey( "header/document");
@@ -671,7 +663,7 @@ public class BuildReport7
 					m.setDocCount( new Double(1));
 				}			
 			} catch( Exception e) {
-				System.err.println("DOH ERROR:" + e.getMessage() );				
+				System.err.println("ERROR:" + e.getMessage() );				
 				throw e;
 			}
 			return m;
@@ -705,7 +697,7 @@ public class BuildReport7
 			// If Documents > 1 then split for MultiDoc
 			if( m.getDocCount() > 1) 
 			{
-				System.out.println("Multidoc! Splitting...");
+				System.out.println("INFO: Multidoc! Splitting...");
 				
 				NodeList list = document.getElementsByTagName( m.getDocElement() );
 
@@ -714,8 +706,6 @@ public class BuildReport7
 				{
 					// First Job - Extract single document from multi-doc source
 					Document singledoc = extractDoc( (Element)list.item( x ) , m.getDocRoot() );
-
-					// DEBUGGING ONLY disaplyXMLDoc( singledoc );
 
 					// Second Job - Use the document key to pull out the reference
 					// for this document eg. 26014667
@@ -731,7 +721,7 @@ public class BuildReport7
 					String ofilePath= outputFile.getParent();
 					
 					outputName =  ofilePath + "\\" + text + ".pdf";
-					System.out.println("Producing document: " + outputName );
+					System.out.println("INFO: Producing document - " + outputName );
 					
 					params.put( JRXPathQueryExecuterFactory.PARAMETER_XML_DATA_DOCUMENT, singledoc);	// Use Generics
 					JasperRunManager.runReportToPdfFile( fileName, outputName , params);
@@ -743,11 +733,10 @@ public class BuildReport7
 			else	// Render as-is .. no more fluffing around
 			{
 
-				System.out.println("Single Document Mode");
+				System.out.println("INFO: Single Document Mode");
 
 				if( parameters != null ) {
-					System.out.println("SQL datasource /w Parameters");
-					System.out.println("No. of Parameters:" + parameters.length);
+					System.out.println("INFO: Using SQL datasource /w Parameters");
 
 					//-----------------------------------------------------
 					// Prepare the Parameters to run the report
@@ -788,7 +777,7 @@ public class BuildReport7
 					makeSymLink("",outputName );
 				
 				} else {
-					System.out.println("XML Datasource");
+					System.out.println("INFO: Using XML Datasource");
 
 					//-----------------------------------------------------
 					// Traditional single document from XML feed
@@ -823,14 +812,14 @@ public class BuildReport7
 			if( "".equals( text ) ) {
 				String fileName = outputFile.getName();
 				text = fileName.substring(0, fileName.lastIndexOf('.'));
-				System.out.println("SingleDoc Refernce: " + text );
+				System.out.println("INFO: SingleDoc Refernce: " + text );
 			}
 
 			// Calculate the new directory branch for the link
 			String[] directories = ofilePath.substring(1).split("OUTPUT");
 			String linkName = "\\" + directories[0] + "OUTPUT\\LINKS\\" + text + "." + directories[1].substring(1,4) +".pdf";
 
-			System.out.println("Building Symlink to: " + linkName );
+			System.out.println("INFO: Building Symlink to: " + linkName );
 			
 			String[] envp = {};					
 			String[] cmd = {"cmd.exe" ,"/C", "mklink", linkName, outputName};
@@ -847,8 +836,6 @@ public class BuildReport7
 				while ((line = in.readLine()) != null) {  
 					System.err.println("ERROR:" + line);  
 				}
-			} else {
-				System.out.println("Symlink successful.");
 			}
 		}
 		
@@ -868,12 +855,11 @@ public class BuildReport7
 			Map<String,Object> params = new HashMap<String,Object>(); // Storage for rendering parameters.
 			JasperPrint jasperPrint = null;
 			
-			System.out.println("Sending to Printer Mode");
+			System.out.println("INFO: Sending to Printer");
 			
 			// TODO - Test if XML or SQL
 			if (parameters != null) {
-				System.out.println("SQL datasource /w Parameters");
-				System.out.println("No. of Parameters:" + parameters.length);
+				System.out.println("INFO: Using SQL datasource /w Parameters");
 
 				//-----------------------------------------------------
 				// Prepare the Parameters to run the report
@@ -909,7 +895,7 @@ public class BuildReport7
 				
 				jasperPrint = JasperFillManager.fillReport( fileName , params , conn);
 			} else {
-				System.out.println("XML Datasource");
+				System.out.println("INFO: XML Datasource");
 
 				Document document = JRXmlUtils.parse(new File( dataName ));
 				params.put(JRXPathQueryExecuterFactory.PARAMETER_XML_DATA_DOCUMENT, document);
@@ -917,15 +903,13 @@ public class BuildReport7
 
 			}
 			
-			//list all printers and select the one selected by the user
-			PrintRequestAttributeSet aset = new HashPrintRequestAttributeSet();  
-			PrintService[] servicesList = PrintServiceLookup.lookupPrintServices(null, aset);
-			for(int l=0;l<servicesList.length;l++){
-				if(servicesList[l].getName().trim().equals( printerName.trim() )){
-					System.out.println("BINGO! Printer queue name:" + servicesList[l].getName() );
-					printerService = servicesList[l];
-					break;
-				}
+			
+			printerService = getPrinterQueue( printerName.trim() );
+			
+			if( printerService == null) 
+			{
+				System.err.println("ERROR: Could not use print queue " + printerName.trim() );
+				return;
 			}
 			
 			PrintRequestAttributeSet printRequestAttributeSet = new HashPrintRequestAttributeSet();
@@ -945,7 +929,7 @@ public class BuildReport7
 			exporter.setParameter(JRPrintServiceExporterParameter.DISPLAY_PRINT_DIALOG, Boolean.FALSE);
 			
 			exporter.exportReport();
-
+				
 			// TODO - Clean this up. Trapping error and throwing it away like it never happened.
 
 			//net.sf.jasperreports.engine.JRException: Error printing report.
@@ -964,9 +948,9 @@ public class BuildReport7
 			try {
 				JasperPrintManager.printReport(jasperPrint, false);
 			} catch(JRException e) {
-				System.err.println("ERROR in sendToPrinter():" + e.getMessage() );				
+				System.err.println("ERROR: sendToPrinter() - " + e.getMessage() );				
 			} catch(Exception e) {
-				System.err.println("Nothing to see here, move along.");
+				System.err.println("ERROR: sendToPrinter() - " + e.getMessage() );
 			}
 			
 		}
@@ -980,8 +964,11 @@ public class BuildReport7
             System.out.println( "(a) The path configuration file must be set with an environment variable CONFIG_FILENAME" );
             System.out.println( "    eg. SET CONFIG_FILENAME=c:\\somewhere\\myconfig.properties" );
             System.out.println( "    The contents must set the following:" );
+            System.out.println( "        evolution.company" );
             System.out.println( "        mail.smtp.host" );
             System.out.println( "        mail.product.datasheet.path" );
+            System.out.println( "        mail.reject.sendTo" );            
+            System.out.println( "        batchcard.cutsheet.path" );
             System.out.println( "        jdbc.connection.url" );
             System.out.println( "        jdbc.connection.username" );
             System.out.println( "        jdbc.connection.username\r\n" );
@@ -1012,18 +999,12 @@ public class BuildReport7
          */
 		private static void sendemail(String mailFromAddr, String mailToAddr, String mailFileAttName, Document document, String templateFilename ) throws Exception
 		{
+			// Use this flag to indicate the message is good as we build it up.
+			boolean isValid = true;
 
-			// Check length of email address - If less than 4, must be Evolution requester
-			if( mailToAddr == null || mailToAddr.length() < 4 ) {
-				System.err.println("ERROR: No To Email Address Supplied, bailing out" );
-				throw new AddressException("No To Email Address Supplied");
-			}
+			// To store the message subject
+			String subjectStr = "";
 
-			if( mailFromAddr == null || mailFromAddr.length() < 4 ) {
-				System.err.println("ERROR: No Email From Address Supplied, bailing out" );
-				throw new AddressException("No Email From Address Supplied");
-			}
-			
 			// Get system properties
 			Properties properties = System.getProperties(); 
 
@@ -1036,13 +1017,6 @@ public class BuildReport7
 
 			// Create a default MimeMessage object.
 			MimeMessage message = new MimeMessage(session);
-
-			// Set the RFC 822 "From" header field using the
-			// value of the InternetAddress.getLocalAddress method.
-			message.setFrom(new InternetAddress( mailFromAddr ));
-
-			// Add the given addresses to the specified recipient type.
-			message.addRecipient(Message.RecipientType.TO, new InternetAddress(mailToAddr));
 
 			//------------------------------------------------------------------------------------
 			MimeBodyPart textPart = new MimeBodyPart();
@@ -1059,6 +1033,32 @@ public class BuildReport7
 			mp.addBodyPart(textPart);
 			mp.addBodyPart(attachFilePart);
 						
+			//-----------------------------------------------------------------------------------------------
+
+			// Validate email address - If less than 4, must be Evolution requester
+			if( !isValidEmailAddress( mailToAddr )) {
+				System.err.println("ERROR: No target email address supplied, bailing out" );
+				
+				// Report it
+				subjectStr = "Error sending " + fds.getName() + " to " + mailToAddr;
+				// Reset TO address per config file
+				mailToAddr = configProps.getProperty( "mail.reject.sendTo" );
+				// Flag email as being invalid (due to recipient)
+				isValid = false;
+								
+			}
+
+			if( !isValidEmailAddress( mailFromAddr )) {
+				System.err.println("ERROR: No source email address supplied, bailing out" );
+				
+				// Report it
+				subjectStr = "Error sending " + fds.getName() + " from " + mailFromAddr;
+				// Reset FROM address per config file
+				mailFromAddr = configProps.getProperty( "mail.reject.sendTo" );
+				// Flag email as being invalid (due to recipient)
+				isValid = false;
+			}
+
 			//-----------------------------------------------------------------------------------------------
 
 			// Check if it is a Multi-Doc. If so,populate "myDoc" object.
@@ -1089,7 +1089,7 @@ public class BuildReport7
 
 				    // Check if file exists
 					if( productSheet.getFile().exists() ) {
-						System.out.println("Attaching: " + fullPath );
+						System.out.println("INFO: Attaching " + fullPath );
 
 						attachment.setDataHandler(new DataHandler(productSheet));
 						attachment.setFileName(productSheet.getName());
@@ -1097,6 +1097,7 @@ public class BuildReport7
 						
 					} else {
 						System.out.println("WARNING: Skipping Attachment (does not exist) - " + fullPath );
+						
 					}
 				}
 
@@ -1104,12 +1105,10 @@ public class BuildReport7
 
 			//-----------------------------------------------------------------------------------------------
 			
-			String subjectStr;
 
 			// If its a single document the getDocCount will be 1
-			// If the document type is recognised, it will populate getDocElement, getDocRoot and getDocKey properties.
-			
-			if( myDoc.getDocCount() > 1 || myDoc.getDocRoot() != null){
+			// If the document type is recognised, it will populate getDocElement, getDocRoot and getDocKey properties
+			if( myDoc.getDocCount() > 1 || myDoc.getDocRoot() != null || isValid ){
 				if( myDoc.getDocElement().equals( "DESPATCH" ) ) {
 					subjectStr = "Despatch document from Pacific NonWovens.";
 				} else if( myDoc.getDocElement().equals( "INVOICE" )) {
@@ -1121,24 +1120,41 @@ public class BuildReport7
 				} else {
 					subjectStr = "Document: " + fds.getName();
 				}
-			} else {
+			} else if (isValid) {
 				subjectStr = "Document: " + fds.getName();
 			}
 
+
 			// Log the results to screen
-			System.out.println( "Email Subject is:" + subjectStr );
-			
+			System.out.println( "INFO: Email Subject is " + subjectStr );
+
+			// Set the RFC 822 "From" header field using the
+			// value of the InternetAddress.getLocalAddress method.
+			message.setFrom(new InternetAddress( mailFromAddr ));
+
+			// Add the given addresses to the specified recipient type.
+			message.addRecipient(Message.RecipientType.TO, new InternetAddress(mailToAddr));
+
 			// Set the "Subject" header field.
 			message.setSubject( subjectStr  ); 
 
 			// Add all the text & attachments in
 			message.setContent(mp);
-				
-			// Send message
-			Transport.send(message);
-            System.out.println("Email sent to:" + mailToAddr);
-            System.out.println("Attached File:" + mailFileAttName);
 			
+			
+            //TODO Trap an SMTP 550 exception
+			try{
+				// Send message
+				Transport.send(message);
+	            System.out.println("INFO: Email sent to:" + mailToAddr);
+	            System.out.println("INFO: Attached File - " + mailFileAttName);
+				
+			} catch (SendFailedException e) {
+				System.err.println("ERROR: " + e.getMessage() );
+				e.printStackTrace();
+			}
+
+            
 		}
 		
         /**
@@ -1150,12 +1166,12 @@ public class BuildReport7
          */
 		private static String getEmailAddress(String requestor) throws Exception
 		{
-			System.out.println("Looking up email address for requestor: " + requestor );
+			System.out.println("INFO: Looking up email address for requestor: " + requestor );
 			String getEmailAddress = null;
 			Class.forName ("oracle.jdbc.OracleDriver");
 
-			//TODO Remove Hard coded "UB" and pass company in
-			String sqlStr = "select  miscalpha_20_1 || miscalpha_20_2 as EmailAddress from misc_data where misc1_co_site = 'UB' and misc1_rec_type = 130 and misc1_ref_1 = '" + requestor + "'";
+			String evoCo = configProps.getProperty( "evolution.company" );
+			String sqlStr = "select  miscalpha_20_1 || miscalpha_20_2 as EmailAddress from misc_data where misc1_co_site = '" + evoCo + "' and misc1_rec_type = 130 and misc1_ref_1 = '" + requestor + "'";
 
 			try {
 
@@ -1193,12 +1209,90 @@ public class BuildReport7
 			catch (SQLException e) 
 			{
 				System.err.println("ERROR:" + e.getMessage() );				
-				throw e;
+				// Dont throw, handle it
+				//throw e;
+				
+				// A null email address will cause the sendEmail() method to direct the message to and administrator.
+				return null;
 			}
 
-			System.out.println("SQL Completed. Email address is: " + getEmailAddress);
+			System.out.println("INFO: SQL Completed. Email address is " + getEmailAddress);
 			return getEmailAddress;
 			
 		}
+
+		/**
+		 * Validate the form of an email address.
+		 *
+		 */
+		public static boolean isValidEmailAddress(String aEmailAddress){
+			if (aEmailAddress == null) return false;
+			if (aEmailAddress.length() == 0) return false;
+
+			try {
+				InternetAddress emailAddr = new InternetAddress(aEmailAddress);
+				emailAddr.validate();
+			}
+			catch (AddressException ex){
+				return false;
+			}
+			return true;
+		}
+		  
+		/**
+		 * Helper method to return a PrintService() object. Centralises logic to check status etc.
+		 * @param printerName
+		 * @return
+		 */
+		private static PrintService getPrinterQueue(String printerName)
+		{
+			PrintService printerService = null;
+			
+			//list all printers and select the one selected by the user
+			PrintRequestAttributeSet aset = new HashPrintRequestAttributeSet();  
+			PrintService[] servicesList = PrintServiceLookup.lookupPrintServices(null, aset);
+			for(int l=0;l<servicesList.length;l++){
+				if(servicesList[l].getName().trim().equals( printerName.trim() )){
+					System.out.println("INFO: Found printer queue " + servicesList[l].getName() );
+					printerService = servicesList[l];
+					
+					// Check Printer is on-line
+					AttributeSet att = printerService.getAttributes();
+					
+					for (Attribute a : att.toArray()) {
+
+						// Pick out the is-accepting-jobs attribute
+						if( "printer-is-accepting-jobs".equals( a.getName() ) ) 
+						{
+							// Check it is accepting jobs
+							if( "not-accepting-jobs".equals( att.get(a.getClass()).toString() ) )
+							{
+								// If you are at this point, its going to throw and exception later, handle it nicely here.
+								System.out.println("WARNING: Printer Queue " + servicesList[l].getName() + " is not accepting jobs. Bailing out.");				
+								
+								// TODO Notify someone ? Email an admin or something ?
+								
+								return null;
+							}
+						}
+					}
+
+					// We found the queue we needed. No point looping any more, move on.
+					break;
+				}
+			}
+
+			// Add nice trap for bogus print queues
+			if( printerService == null)
+			{
+				// If you are at this point, its going to throw and exception later, handle it nicely here.
+				System.out.println("WARNING: Printer queue " + printerName + " was not found. Bailing out.");				
+				
+			}
+			
+			return printerService;
+
+		}
+
 }
 
