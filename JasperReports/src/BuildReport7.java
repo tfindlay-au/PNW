@@ -211,7 +211,6 @@ public class BuildReport7
 			}
 			else if (TASK_EMAIL.equals(taskName))
 			{
-				// TODO: Test Input params before we begin
 		
 				makePDF(dataName, fileName, outputName, true, parameters);
 				logger.info("PDF creation time : " + (System.currentTimeMillis() - start));
